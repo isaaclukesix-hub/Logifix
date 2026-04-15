@@ -165,6 +165,14 @@
       40%            { opacity: 1;    transform: translateY(-5px); }
     }
     .loading-text { font-size: 0.8rem; color: #718096; font-style: italic; }
+    .msg-time {
+      display: block;
+      font-size: 0.6rem;
+      color: #A0AEC0;
+      margin-top: 6px;
+      letter-spacing: 0.3px;
+    }
+    .bub-user .msg-time { color: rgba(255,255,255,0.6); }
     .input-area { display: flex; border-top: 1px solid #E2E8F0; }
     textarea#userInput {
       flex: 1;
@@ -326,13 +334,19 @@
     const userInput = document.getElementById("userInput");
     const sendBtn   = document.getElementById("sendBtn");
     const loading   = document.getElementById("loading");
-    const sessionId = "s_" + Math.random().toString(36).slice(2, 9);
+
+    // Full conversation history sent to backend on every request
+    const conversationHistory = [];
 
     function handleKey(e) {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
     }
 
     function ask(text) { userInput.value = text; send(); }
+
+    function nowTime() {
+      return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
 
     function addMsg(text, who) {
       const wrap = document.createElement("div");
@@ -358,6 +372,11 @@
         bub.appendChild(p);
       });
 
+      const time = document.createElement("span");
+      time.className = "msg-time";
+      time.textContent = nowTime();
+      bub.appendChild(time);
+
       wrap.appendChild(av);
       wrap.appendChild(bub);
       chatBox.appendChild(wrap);
@@ -373,19 +392,29 @@
     async function send() {
       const msg = userInput.value.trim();
       if (!msg) { userInput.focus(); return; }
+
+      // Add to history and UI before the request
+      conversationHistory.push({ role: "user", content: msg });
       addMsg(msg, "user");
       userInput.value = "";
       setLoading(true);
+
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: msg, mode: "simple", sessionId }),
+          body: JSON.stringify({ messages: conversationHistory, mode: "simple" }),
         });
         const data = await res.json();
-        addMsg(data.error ? "Sorry, something went wrong. Please try again." : data.reply, "bot");
+        const reply = data.error
+          ? "Sorry, something went wrong. Please try again."
+          : data.reply;
+
+        // Add assistant reply to history and UI
+        conversationHistory.push({ role: "assistant", content: reply });
+        addMsg(reply, "bot");
       } catch {
-        addMsg("Could not reach the server. Please make sure node server.js is running.", "bot");
+        addMsg("Could not reach the server. Please try again in a moment.", "bot");
       } finally {
         setLoading(false);
         userInput.focus();

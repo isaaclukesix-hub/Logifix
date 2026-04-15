@@ -50,52 +50,30 @@ RULES:
 
 TONE: Warm, calm, encouraging. Never overwhelming.`;
 
-const sessions = {};
-
-setInterval(() => {
-  const oneHourAgo = Date.now() - 60 * 60 * 1000;
-  for (const id in sessions) {
-    if (sessions[id].lastActive < oneHourAgo) {
-      delete sessions[id];
-    }
-  }
-}, 15 * 60 * 1000);
-
 app.post("/api/chat", async (req, res) => {
-  const { message, mode = "simple", sessionId = "default" } = req.body;
+  const { messages, mode = "simple" } = req.body;
 
-  if (!message || message.trim() === "") {
+  if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: "Please type a message first." });
   }
 
-  if (!sessions[sessionId]) {
-    sessions[sessionId] = { messages: [], lastActive: Date.now() };
-  }
-
-  const session = sessions[sessionId];
-  session.lastActive = Date.now();
-
-  session.messages.push({ role: "user", content: message });
-
-  if (session.messages.length > 10) {
-    session.messages = session.messages.slice(-10);
-  }
-
   const systemPrompt = mode === "detailed" ? DETAILED_PROMPT : SIMPLE_PROMPT;
+
+  // Keep last 20 turns to avoid hitting token limits
+  const trimmed = messages.slice(-20);
 
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
-        ...session.messages,
+        ...trimmed,
       ],
       max_tokens: 400,
       temperature: 0.5,
     });
 
     const reply = completion.choices[0].message.content;
-    session.messages.push({ role: "assistant", content: reply });
     res.json({ reply });
 
   } catch (error) {
@@ -104,14 +82,6 @@ app.post("/api/chat", async (req, res) => {
       error: "Something went wrong. Please check your API key and try again.",
     });
   }
-});
-
-app.post("/clear", (req, res) => {
-  const { sessionId = "default" } = req.body;
-  if (sessions[sessionId]) {
-    sessions[sessionId].messages = [];
-  }
-  res.json({ ok: true });
 });
 
 app.listen(PORT, () => {

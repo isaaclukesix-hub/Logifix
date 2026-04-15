@@ -61,7 +61,7 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000);
 
-app.post("/chat", async (req, res) => {
+app.post("/api/chat", async (req, res) => {
   const { message, mode = "simple", sessionId = "default" } = req.body;
 
   if (!message || message.trim() === "") {

@@ -53,22 +53,23 @@ TONE: Warm, calm, encouraging. Never overwhelming.`;
 app.post("/api/chat", async (req, res) => {
   const { messages, mode = "simple" } = req.body;
 
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: "Please type a message first." });
+  if (!Array.isArray(messages)) {
+    return res.status(400).json({ reply: "Invalid messages format" });
   }
 
   const systemPrompt = mode === "detailed" ? DETAILED_PROMPT : SIMPLE_PROMPT;
 
-  // Keep last 20 turns to avoid hitting token limits
-  const trimmed = messages.slice(-20);
+  const finalMessages = [
+    { role: "system", content: systemPrompt },
+    ...messages.slice(-20),
+  ];
+
+  console.log("Sending messages:", JSON.stringify(finalMessages, null, 2));
 
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...trimmed,
-      ],
+      messages: finalMessages,
       max_tokens: 400,
       temperature: 0.5,
     });
@@ -76,11 +77,12 @@ app.post("/api/chat", async (req, res) => {
     const reply = completion.choices[0].message.content;
     res.json({ reply });
 
-  } catch (error) {
-    console.error("OpenAI Error:", error.message);
-    res.status(500).json({
-      error: "Something went wrong. Please check your API key and try again.",
-    });
+  } catch (err) {
+    console.error("FULL ERROR:", err);
+    if (err.response) {
+      console.error("API RESPONSE:", err.response.data);
+    }
+    res.status(500).json({ reply: "Server error. Check logs." });
   }
 });
 

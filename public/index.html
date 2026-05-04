@@ -174,6 +174,41 @@
     }
     .bub-user .msg-time { color: rgba(255,255,255,0.6); }
     .input-area { display: flex; border-top: 1px solid #E2E8F0; }
+    #imageInput { display: none; }
+    .attach-btn {
+      background: #F7FAFC;
+      border: none;
+      border-right: 1px solid #E2E8F0;
+      padding: 0 14px;
+      color: #718096;
+      font-size: 1.1rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+    .attach-btn:hover:not(:disabled) { background: #EBF4FF; color: #1A56DB; }
+    .attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .image-preview {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 18px;
+      background: #EBF4FF;
+      border-top: 1px solid #BEE3F8;
+      font-size: 0.72rem;
+      color: #2B6CB0;
+    }
+    .image-preview.visible { display: flex; }
+    .preview-clear {
+      background: none;
+      border: none;
+      color: #E53E3E;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      margin-left: auto;
+    }
     textarea#userInput {
       flex: 1;
       font-family: 'Inter', sans-serif;
@@ -297,8 +332,14 @@
         <span class="loading-text">Finding an answer for you...</span>
       </div>
 
+      <div class="image-preview" id="imagePreview">
+        <span id="imagePreviewName"></span>
+        <button class="preview-clear" onclick="clearImage()">✕ Remove</button>
+      </div>
       <div class="input-area">
         <textarea id="userInput" placeholder="Type your question here..." rows="2" onkeydown="handleKey(event)"></textarea>
+        <button class="attach-btn" id="attachBtn" title="Attach image" onclick="document.getElementById('imageInput').click()">📎</button>
+        <input type="file" id="imageInput" accept="image/*" onchange="handleImageSelect(event)">
         <button class="send-btn" id="sendBtn" onclick="send()">Send</button>
       </div>
     </div>
@@ -330,12 +371,15 @@
   </main>
 
   <script>
-    const chatBox   = document.getElementById("chatBox");
-    const userInput = document.getElementById("userInput");
-    const sendBtn   = document.getElementById("sendBtn");
-    const loading   = document.getElementById("loading");
+    const chatBox        = document.getElementById("chatBox");
+    const userInput      = document.getElementById("userInput");
+    const sendBtn        = document.getElementById("sendBtn");
+    const attachBtn      = document.getElementById("attachBtn");
+    const imageInput     = document.getElementById("imageInput");
+    const imagePreview   = document.getElementById("imagePreview");
+    const imagePreviewName = document.getElementById("imagePreviewName");
+    const loading        = document.getElementById("loading");
 
-    // Full conversation history sent to backend on every request
     const conversationHistory = [];
 
     function handleKey(e) {
@@ -346,6 +390,19 @@
 
     function nowTime() {
       return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function handleImageSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      imagePreviewName.textContent = "📷 " + file.name;
+      imagePreview.classList.add("visible");
+    }
+
+    function clearImage() {
+      imageInput.value = "";
+      imagePreview.classList.remove("visible");
+      imagePreviewName.textContent = "";
     }
 
     function addMsg(text, who) {
@@ -385,32 +442,44 @@
 
     function setLoading(on) {
       loading.style.display = on ? "flex" : "none";
-      sendBtn.disabled = on;
+      sendBtn.disabled   = on;
+      attachBtn.disabled = on;
       userInput.disabled = on;
     }
 
     async function send() {
-      const msg = userInput.value.trim();
-      if (!msg) { userInput.focus(); return; }
+      const msg       = userInput.value.trim();
+      const imageFile = imageInput.files[0];
 
-      // Add to history and UI before the request
-      conversationHistory.push({ role: "user", content: msg });
-      addMsg(msg, "user");
+      if (!msg && !imageFile) { userInput.focus(); return; }
+
+      // Text shown in chat; fallback when only an image is sent
+      const displayText = msg || "📷 Image shared";
+      // Content stored in history (text only — image is handled server-side)
+      const historyContent = msg || "Please help me with this image.";
+
+      conversationHistory.push({ role: "user", content: historyContent });
+      addMsg(displayText, "user");
       userInput.value = "";
+      clearImage();
       setLoading(true);
+
+      const formData = new FormData();
+      formData.append("messages", JSON.stringify(conversationHistory));
+      if (imageFile) {
+        formData.append("image", imageFile);
+      }
 
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: conversationHistory }),
+          body: formData,  // browser sets Content-Type + boundary automatically
         });
         const data = await res.json();
         const reply = data.error
           ? "Sorry, something went wrong. Please try again."
           : data.reply;
 
-        // Add assistant reply to history and UI
         conversationHistory.push({ role: "assistant", content: reply });
         addMsg(reply, "bot");
       } catch {

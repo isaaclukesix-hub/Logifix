@@ -2,49 +2,124 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const OpenAI = require("openai");
+const multer = require("multer");
 const path = require("path");
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+});
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+app.use((req, res, next) => {
+  if (req.headers.host && req.headers.host.includes("tech-helper-ai")) {
+    return res.redirect(301, "https://logifix.onrender.com" + req.url);
+  }
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-const SYSTEM_PROMPT = `You are LogiFix, a friendly and clear tech support assistant. You guide people through technology problems one step at a time, like a real technician sitting beside them.
+const systemMessage = {
+  role: "system",
+  content: `
+You are LogiFix, an expert IT support technician.
+
+You deeply understand:
+- iPhones, Android phones, Windows, Mac
+- WiFi, Bluetooth, apps, settings, hardware issues
+
+Your job is to:
+- Diagnose problems step-by-step
+- Identify the MOST likely cause first
+- Ask targeted questions
+- Guide users like a real technician
 
 RULES:
-1. Give only 1–2 steps at a time. Never dump everything at once.
-2. After each set of steps, ask ONE specific follow-up question to check where the user is.
-3. Never say "let me know if you need more help" or "feel free to ask" — instead, ask a direct question.
-4. If you don't know what device or app they are using, ask before giving any instructions.
-5. Never give iPhone and Android instructions at the same time. Ask which one first.
-6. Use plain everyday words only. Never say: browser, reboot, navigate, interface, settings menu. Instead say: the program you use to look at websites, turn it off and back on, tap the three lines in the corner.
-7. Assume the user is not tech-savvy. Be patient, specific, and confident.
-8. Keep responses short. 2–4 sentences max per reply, plus your follow-up question.
 
-EXAMPLE STYLE:
+1. THINK LIKE A TECHNICIAN
+- Always consider multiple causes
+- Start with the most likely one
 
-User: My phone won't connect to WiFi.
-GOOD: Let's start simple. On your phone, go to the Settings — that's the grey icon that looks like a gear. Once you're there, do you see a section that says "Wi-Fi" or "Wireless"?
+2. STEP-BY-STEP ONLY
+- Give ONLY 1–2 steps at a time
+- Wait for user response before continuing
 
-User: I can't send emails.
-GOOD: First, are you using a phone or a computer to send emails? That will help me give you the right steps.
+3. BE SPECIFIC
+- Mention exact paths:
+  Example: "Go to Settings > WiFi"
 
-TONE: Calm, direct, and specific. Like a patient technician who has seen this problem a hundred times and knows exactly how to fix it.`;
+4. USE IMAGES WHEN PROVIDED
+- If a screenshot/photo is included:
+  - Analyze what is visible
+  - Reference specific elements in the image
+  - Use it to narrow the issue
 
-app.post("/api/chat", async (req, res) => {
-  const { messages } = req.body;
+5. ASK FOLLOW-UP QUESTIONS
+- Example:
+  "Do you see your WiFi network listed there?"
 
-  if (!Array.isArray(messages)) {
+6. NO GENERIC ADVICE
+- Do NOT say "try restarting" unless justified
+- Do NOT say "let me know if that works"
+
+7. KEEP RESPONSES SHORT, CLEAR, AND CONFIDENT
+
+EXAMPLE:
+
+User: "My WiFi isn't working"
+
+Good response:
+"First, check if your phone is still connected to your WiFi network. Go to Settings > WiFi. Do you see your network listed and connected?"
+`
+};
+
+app.post("/api/chat", upload.single("image"), async (req, res) => {
+  let messages;
+  try {
+    // FormData sends everything as strings; JSON body also accepted
+    messages = typeof req.body.messages === "string"
+      ? JSON.parse(req.body.messages)
+      : req.body.messages;
+  } catch {
     return res.status(400).json({ reply: "Invalid messages format" });
   }
 
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ reply: "Invalid messages format" });
+  }
+
+  let historyMessages = messages.slice(-20);
+
+  // If an image was uploaded, inject it into the last user message
+  if (req.file) {
+    const base64 = req.file.buffer.toString("base64");
+    const mime = req.file.mimetype || "image/png";
+    const last = historyMessages[historyMessages.length - 1];
+    const textContent = (typeof last.content === "string" ? last.content : "Please help me with this image.")
+      + " Use the image to help diagnose the issue.";
+
+    historyMessages = [
+      ...historyMessages.slice(0, -1),
+      {
+        role: "user",
+        content: [
+          { type: "text", text: textContent },
+          { type: "image_url", image_url: { url: `data:${mime};base64,${base64}` } },
+        ],
+      },
+    ];
+  }
+
   const finalMessages = [
-    { role: "system", content: SYSTEM_PROMPT },
-    ...messages.slice(-20),
+    systemMessage,
+    ...historyMessages,
   ];
 
   console.log("Sending messages:", JSON.stringify(finalMessages, null, 2));
@@ -67,6 +142,15 @@ app.post("/api/chat", async (req, res) => {
     }
     res.status(500).json({ reply: "Server error. Check logs." });
   }
+});
+
+// Handle multer file-size errors
+app.use((err, req, res, next) => {
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ reply: "Image too large. Please use a file under 5 MB." });
+  }
+  console.error("Unhandled error:", err);
+  res.status(500).json({ reply: "Server error." });
 });
 
 app.listen(PORT, () => {

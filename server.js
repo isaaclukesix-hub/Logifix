@@ -144,6 +144,10 @@ app.post("/api/chat", upload.single("image"), async (req, res) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 // Handle multer file-size errors
 app.use((err, req, res, next) => {
   if (err.code === "LIMIT_FILE_SIZE") {
